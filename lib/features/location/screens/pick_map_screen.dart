@@ -23,8 +23,13 @@ class PickMapScreen extends StatefulWidget {
   final String? route;
   final GoogleMapController? googleMapController;
   const PickMapScreen({
-    super.key, required this.fromSignUp, required this.fromAddAddress, required this.canRoute,
-    required this.route, this.googleMapController, required this.fromSplash,
+    super.key,
+    required this.fromSignUp,
+    required this.fromAddAddress,
+    required this.canRoute,
+    required this.route,
+    this.googleMapController,
+    required this.fromSplash,
   });
 
   @override
@@ -42,12 +47,16 @@ class _PickMapScreenState extends State<PickMapScreen> {
 
     Get.find<LocationController>().makeLoadingOff();
 
-    if(widget.fromAddAddress) {
+    if (widget.fromAddAddress) {
       Get.find<LocationController>().setPickData();
     }
     _initialPosition = LatLng(
-      double.parse(Get.find<SplashController>().configModel!.defaultLocation!.lat ?? '0'),
-      double.parse(Get.find<SplashController>().configModel!.defaultLocation!.lng ?? '0'),
+      double.parse(
+          Get.find<SplashController>().configModel!.defaultLocation!.lat ??
+              '0'),
+      double.parse(
+          Get.find<SplashController>().configModel!.defaultLocation!.lng ??
+              '0'),
     );
   }
 
@@ -55,23 +64,28 @@ class _PickMapScreenState extends State<PickMapScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: ResponsiveHelper.isDesktop(context) ? const WebMenuBar() : null,
-      body: SafeArea(child: Center(child: SizedBox(
+      body: SafeArea(
+          child: Center(
+              child: SizedBox(
         width: Dimensions.webMaxWidth,
         child: GetBuilder<LocationController>(builder: (locationController) {
           return Stack(children: [
-
             GoogleMap(
               initialCameraPosition: CameraPosition(
-                target: widget.fromAddAddress ? LatLng(locationController.position.latitude, locationController.position.longitude)
+                target: widget.fromAddAddress
+                    ? LatLng(locationController.position.latitude,
+                        locationController.position.longitude)
                     : _initialPosition,
                 zoom: 16,
               ),
               minMaxZoomPreference: const MinMaxZoomPreference(0, 16),
               onMapCreated: (GoogleMapController mapController) {
                 _mapController = mapController;
-                if(!widget.fromAddAddress && widget.route != 'splash') {
-                  Get.find<LocationController>().getCurrentLocation(false, mapController: mapController).then((value) {
-                    if(widget.fromSplash) {
+                if (!widget.fromAddAddress && widget.route != 'splash') {
+                  Get.find<LocationController>()
+                      .getCurrentLocation(false, mapController: mapController)
+                      .then((value) {
+                    if (widget.fromSplash) {
                       _onPickAddressButtonPressed(locationController);
                     }
                   });
@@ -85,17 +99,24 @@ class _PickMapScreenState extends State<PickMapScreen> {
                 locationController.disableButton();
               },
               onCameraIdle: () {
-                Get.find<LocationController>().updatePosition(_cameraPosition, false);
+                Get.find<LocationController>()
+                    .updatePosition(_cameraPosition, false);
               },
-              style: Get.isDarkMode ? Get.find<ThemeController>().darkMap : Get.find<ThemeController>().lightMap,
+              style: Get.isDarkMode
+                  ? Get.find<ThemeController>().darkMap
+                  : Get.find<ThemeController>().lightMap,
             ),
-
-            Center(child: !locationController.loading ? Image.asset(Images.pickMarker, height: 50, width: 50)
-                : const CircularProgressIndicator()),
-
+            Center(
+                child: !locationController.loading
+                    ? Image.asset(Images.pickMarker, height: 50, width: 50)
+                    : const CircularProgressIndicator()),
             Positioned(
-              top: Dimensions.paddingSizeLarge, left: Dimensions.paddingSizeSmall, right: Dimensions.paddingSizeSmall,
-              child: LocationSearchDialog(mapController: _mapController, pickedLocation: locationController.pickAddress!),
+              top: Dimensions.paddingSizeLarge,
+              left: Dimensions.paddingSizeSmall,
+              right: Dimensions.paddingSizeSmall,
+              child: LocationSearchDialog(
+                  mapController: _mapController,
+                  pickedLocation: locationController.pickAddress!),
               /*child: InkWell(
                 onTap: () => Get.dialog(LocationSearchDialog(mapController: _mapController)),
                 child: Container(
@@ -117,29 +138,37 @@ class _PickMapScreenState extends State<PickMapScreen> {
                 ),
               ),*/
             ),
-
             Positioned(
-              bottom: 80, right: Dimensions.paddingSizeSmall,
+              bottom: 80,
+              right: Dimensions.paddingSizeSmall,
               child: FloatingActionButton(
-                mini: true, backgroundColor: Theme.of(context).cardColor,
+                mini: true,
+                backgroundColor: Theme.of(context).cardColor,
                 onPressed: () => _checkPermission(() {
-                  Get.find<LocationController>().getCurrentLocation(false, mapController: _mapController);
+                  Get.find<LocationController>()
+                      .getCurrentLocation(false, mapController: _mapController);
                 }),
-                child: Icon(Icons.my_location, color: Theme.of(context).primaryColor),
+                child: Icon(Icons.my_location,
+                    color: Theme.of(context).primaryColor),
               ),
             ),
-
             Positioned(
-              bottom: Dimensions.paddingSizeLarge, left: Dimensions.paddingSizeSmall, right: Dimensions.paddingSizeSmall,
+              bottom: Dimensions.paddingSizeLarge,
+              left: Dimensions.paddingSizeSmall,
+              right: Dimensions.paddingSizeSmall,
               child: CustomButtonWidget(
-                buttonText: locationController.inZone ? widget.fromAddAddress ? 'pick_address'.tr : 'pick_location'.tr
+                buttonText: locationController.inZone
+                    ? widget.fromAddAddress
+                        ? 'pick_address'.tr
+                        : 'pick_location'.tr
                     : 'service_not_available_in_this_area'.tr,
                 isLoading: locationController.isLoading,
-                onPressed: (locationController.buttonDisabled || locationController.loading) ? null
+                onPressed: (locationController.buttonDisabled ||
+                        locationController.loading)
+                    ? null
                     : () => _onPickAddressButtonPressed(locationController),
               ),
             ),
-
           ]);
         }),
       ))),
@@ -147,38 +176,49 @@ class _PickMapScreenState extends State<PickMapScreen> {
   }
 
   void _onPickAddressButtonPressed(LocationController locationController) {
-    if(locationController.pickPosition.latitude != 0 && locationController.pickAddress!.isNotEmpty) {
-      if(widget.fromAddAddress) {
-        if(widget.googleMapController != null) {
-          widget.googleMapController!.moveCamera(CameraUpdate.newCameraPosition(CameraPosition(target: LatLng(
-            locationController.pickPosition.latitude, locationController.pickPosition.longitude,
-          ), zoom: 17)));
+    if (locationController.pickPosition.latitude != 0 &&
+        locationController.pickAddress!.isNotEmpty) {
+      if (widget.fromAddAddress) {
+        if (widget.googleMapController != null) {
+          widget.googleMapController!
+              .moveCamera(CameraUpdate.newCameraPosition(CameraPosition(
+                  target: LatLng(
+                    locationController.pickPosition.latitude,
+                    locationController.pickPosition.longitude,
+                  ),
+                  zoom: 17)));
           locationController.addAddressData();
         }
         Get.back();
-      }else {
+      } else {
         AddressModel address = AddressModel(
           latitude: locationController.pickPosition.latitude.toString(),
           longitude: locationController.pickPosition.longitude.toString(),
-          addressType: 'others', address: locationController.pickAddress,
+          addressType: 'others',
+          address: locationController.pickAddress,
         );
-        locationController.saveAddressAndNavigate(address, widget.fromSignUp, widget.route, widget.canRoute, ResponsiveHelper.isDesktop(Get.context));
+        locationController.saveAddressAndNavigate(
+            address,
+            widget.fromSignUp,
+            widget.route,
+            widget.canRoute,
+            ResponsiveHelper.isDesktop(Get.context));
       }
-    }else {
+    } else {
       showCustomSnackBar('pick_an_address'.tr);
     }
   }
 
   void _checkPermission(Function onTap) async {
     LocationPermission permission = await Geolocator.checkPermission();
-    if(permission == LocationPermission.denied) {
+    if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
     }
-    if(permission == LocationPermission.denied) {
+    if (permission == LocationPermission.denied) {
       showCustomSnackBar('you_have_to_allow'.tr);
-    }else if(permission == LocationPermission.deniedForever) {
+    } else if (permission == LocationPermission.deniedForever) {
       Get.dialog(const PermissionDialog());
-    }else {
+    } else {
       onTap();
     }
   }

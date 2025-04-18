@@ -14,16 +14,37 @@ import 'package:geolocator/geolocator.dart';
 import 'package:get/get.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:stackfood_multivendor/helper/route_helper.dart';
+import 'package:geocoding/geocoding.dart';
 
 class LocationController extends GetxController implements GetxService {
   final LocationServiceInterface locationServiceInterface;
 
   LocationController({required this.locationServiceInterface});
 
-  Position _position = Position(longitude: 0, latitude: 0, timestamp: DateTime.now(), accuracy: 1, altitude: 1, heading: 1, speed: 1, speedAccuracy: 1, altitudeAccuracy: 1, headingAccuracy: 1);
+  Position _position = Position(
+      longitude: 0,
+      latitude: 0,
+      timestamp: DateTime.now(),
+      accuracy: 1,
+      altitude: 1,
+      heading: 1,
+      speed: 1,
+      speedAccuracy: 1,
+      altitudeAccuracy: 1,
+      headingAccuracy: 1);
   Position get position => _position;
 
-  Position _pickPosition = Position(longitude: 0, latitude: 0, timestamp: DateTime.now(), accuracy: 1, altitude: 1, heading: 1, speed: 1, speedAccuracy: 1, altitudeAccuracy: 1, headingAccuracy: 1);
+  Position _pickPosition = Position(
+      longitude: 0,
+      latitude: 0,
+      timestamp: DateTime.now(),
+      accuracy: 1,
+      altitude: 1,
+      heading: 1,
+      speed: 1,
+      speedAccuracy: 1,
+      altitudeAccuracy: 1,
+      headingAccuracy: 1);
   Position get pickPosition => _pickPosition;
 
   bool _loading = false;
@@ -61,61 +82,112 @@ class LocationController extends GetxController implements GetxService {
 
   bool _updateAddressData = true;
   bool _changeAddress = true;
-
-  Future<AddressModel> getCurrentLocation(bool fromAddress, {GoogleMapController? mapController, LatLng? defaultLatLng, bool notify = true, bool showSnackBar = false}) async {
+  Future<AddressModel> getCurrentLocation(bool fromAddress,
+      {GoogleMapController? mapController,
+      LatLng? defaultLatLng,
+      bool notify = true,
+      bool showSnackBar = false}) async {
     _loading = true;
-    if(notify) {
+    if (notify) {
       update();
     }
-    AddressModel addressModel;
-    Position myPosition = await locationServiceInterface.getPosition(
-      defaultLatLng,
-      LatLng(
-        double.parse(Get.find<SplashController>().configModel!.defaultLocation!.lat ?? '0'),
-        double.parse(Get.find<SplashController>().configModel!.defaultLocation!.lng ?? '0'),
-      ),
-    );
-    fromAddress ? _position = myPosition : _pickPosition = myPosition;
 
-    locationServiceInterface.handleMapAnimation(mapController, myPosition);
-    String addressFromGeocode = await getAddressFromGeocode(LatLng(myPosition.latitude, myPosition.longitude));
-    fromAddress ? _address = addressFromGeocode : _pickAddress = addressFromGeocode;
-    ZoneResponseModel responseModel = await getZone(myPosition.latitude.toString(), myPosition.longitude.toString(), true, showSnackBar: showSnackBar);
+    AddressModel addressModel;
+
+    // 1. التأكد من صلاحيات الموقع
+    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      if (showSnackBar) {
+        showCustomSnackBar('Location services are disabled.');
+      }
+      _loading = false;
+      update();
+      throw Exception('Location services are disabled.');
+    }
+
+    LocationPermission permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied) {
+        _loading = false;
+        update();
+        throw Exception('Location permissions are denied.');
+      }
+    }
+
+    if (permission == LocationPermission.deniedForever) {
+      _loading = false;
+      update();
+      throw Exception('Location permissions are permanently denied.');
+    }
+
+    // 2. الحصول على الإحداثيات
+    Position position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high);
+    fromAddress ? _position = position : _pickPosition = position;
+
+    // 3. تحريك الخريطة إن وُجدت
+    if (mapController != null) {
+      mapController.animateCamera(CameraUpdate.newLatLng(
+        LatLng(position.latitude, position.longitude),
+      ));
+    }
+
+    // 4. تحويل الإحداثيات إلى عنوان نصي باستخدام geocoding
+    List<Placemark> placemarks =
+        await placemarkFromCoordinates(position.latitude, position.longitude);
+    Placemark place = placemarks.first;
+    String address =
+        '${place.street}, ${place.locality}, ${place.administrativeArea}, ${place.country}';
+    fromAddress ? _address = address : _pickAddress = address;
+
+    // 5. استخدام zoneResponse وهمي (أنت ممكن تبدل هذا بجلب بيانات من API إذا أردت)
+    ZoneResponseModel responseModel = await getZone(
+        position.latitude.toString(), position.longitude.toString(), true,
+        showSnackBar: showSnackBar);
     _buttonDisabled = !responseModel.isSuccess;
+
+    // 6. إنشاء AddressModel
     addressModel = AddressModel(
-      latitude: myPosition.latitude.toString(), longitude: myPosition.longitude.toString(), addressType: 'others',
-      zoneId: responseModel.isSuccess ? responseModel.zoneIds[0] : 0, zoneIds: responseModel.zoneIds,
-      address: addressFromGeocode, zoneData: responseModel.zoneData,
+      latitude: position.latitude.toString(),
+      longitude: position.longitude.toString(),
+      addressType: 'others',
+      zoneId: responseModel.isSuccess ? responseModel.zoneIds[0] : 0,
+      zoneIds: responseModel.zoneIds,
+      address: address,
+      zoneData: responseModel.zoneData,
     );
+
     _loading = false;
     update();
     return addressModel;
   }
 
-  Future<ZoneResponseModel> getZone(String? lat, String? long, bool markerLoad, {bool updateInAddress = false, bool showSnackBar = false}) async {
-    if(markerLoad) {
+  Future<ZoneResponseModel> getZone(String? lat, String? long, bool markerLoad,
+      {bool updateInAddress = false, bool showSnackBar = false}) async {
+    if (markerLoad) {
       _loading = true;
-    }else {
+    } else {
       _isLoading = true;
     }
-    if(!updateInAddress){
+    if (!updateInAddress) {
       Future.delayed(Duration(seconds: 10), () {
         update();
       });
-
     }
-    ZoneResponseModel responseModel = await locationServiceInterface.getZone(lat, long);
+    ZoneResponseModel responseModel =
+        await locationServiceInterface.getZone(lat, long);
     _inZone = responseModel.isSuccess;
     _zoneID = responseModel.zoneIds.isNotEmpty ? responseModel.zoneIds[0] : 0;
-    if(updateInAddress && responseModel.isSuccess) {
+    if (updateInAddress && responseModel.isSuccess) {
       AddressModel address = AddressHelper.getAddressFromSharedPref()!;
       address.zoneData = responseModel.zoneData;
       AddressHelper.saveAddressInSharedPref(address);
     }
 
-    if(markerLoad) {
+    if (markerLoad) {
       _loading = false;
-    }else {
+    } else {
       _isLoading = false;
     }
     update();
@@ -127,47 +199,71 @@ class LocationController extends GetxController implements GetxService {
   }
 
   void updatePosition(CameraPosition? position, bool fromAddress) async {
-    if(_updateAddressData) {
+    if (_updateAddressData) {
       _loading = true;
       update();
       if (fromAddress) {
         _position = Position(
-          latitude: position!.target.latitude, longitude: position.target.longitude, timestamp: DateTime.now(),
-          heading: 1, accuracy: 1, altitude: 1, speedAccuracy: 1, speed: 1, altitudeAccuracy: 1, headingAccuracy: 1,
+          latitude: position!.target.latitude,
+          longitude: position.target.longitude,
+          timestamp: DateTime.now(),
+          heading: 1,
+          accuracy: 1,
+          altitude: 1,
+          speedAccuracy: 1,
+          speed: 1,
+          altitudeAccuracy: 1,
+          headingAccuracy: 1,
         );
       } else {
         _pickPosition = Position(
-          latitude: position!.target.latitude, longitude: position.target.longitude, timestamp: DateTime.now(),
-          heading: 1, accuracy: 1, altitude: 1, speedAccuracy: 1, speed: 1, altitudeAccuracy: 1, headingAccuracy: 1,
+          latitude: position!.target.latitude,
+          longitude: position.target.longitude,
+          timestamp: DateTime.now(),
+          heading: 1,
+          accuracy: 1,
+          altitude: 1,
+          speedAccuracy: 1,
+          speed: 1,
+          altitudeAccuracy: 1,
+          headingAccuracy: 1,
         );
       }
-      ZoneResponseModel responseModel = await getZone(position.target.latitude.toString(), position.target.longitude.toString(), true);
+      ZoneResponseModel responseModel = await getZone(
+          position.target.latitude.toString(),
+          position.target.longitude.toString(),
+          true);
       _buttonDisabled = !responseModel.isSuccess;
       if (_changeAddress) {
-        String addressFromGeocode = await getAddressFromGeocode(LatLng(position.target.latitude, position.target.longitude));
-        fromAddress ? _address = addressFromGeocode : _pickAddress = addressFromGeocode;
+        String addressFromGeocode = await getAddressFromGeocode(
+            LatLng(position.target.latitude, position.target.longitude));
+        fromAddress
+            ? _address = addressFromGeocode
+            : _pickAddress = addressFromGeocode;
       } else {
         _changeAddress = true;
       }
       _loading = false;
       update();
-    }else {
+    } else {
       _updateAddressData = true;
     }
   }
 
   void setAddressTypeIndex(int index, {bool notify = true}) {
     _addressTypeIndex = index;
-    if(notify) {
+    if (notify) {
       update();
     }
   }
 
-  void saveAddressAndNavigate(AddressModel address, bool fromSignUp, String? route, bool canRoute, bool isDesktop) {
+  void saveAddressAndNavigate(AddressModel address, bool fromSignUp,
+      String? route, bool canRoute, bool isDesktop) {
     _prepareZoneData(address, fromSignUp, route, canRoute, isDesktop);
   }
 
-  void _prepareZoneData(AddressModel address, bool fromSignUp, String? route, bool canRoute, bool isDesktop) {
+  void _prepareZoneData(AddressModel address, bool fromSignUp, String? route,
+      bool canRoute, bool isDesktop) {
     getZone(address.latitude, address.longitude, false).then((response) async {
       if (response.isSuccess) {
         Get.find<CartController>().getCartDataOnline();
@@ -180,21 +276,23 @@ class LocationController extends GetxController implements GetxService {
       } else {
         Get.back();
         showCustomSnackBar(response.message);
-        if(route == 'splash') {
+        if (route == 'splash') {
           Get.toNamed(RouteHelper.getPickMapRoute(route, false));
         }
       }
     });
   }
 
-  void autoNavigate(AddressModel? address, bool fromSignUp, String? route, bool canRoute, bool isDesktop) async {
-    locationServiceInterface.handleTopicSubscription(AddressHelper.getAddressFromSharedPref(), address);
+  void autoNavigate(AddressModel? address, bool fromSignUp, String? route,
+      bool canRoute, bool isDesktop) async {
+    locationServiceInterface.handleTopicSubscription(
+        AddressHelper.getAddressFromSharedPref(), address);
     await AddressHelper.saveAddressInSharedPref(address!);
-    if(AuthHelper.isLoggedIn() && !AuthHelper.isGuestLoggedIn() ) {
+    if (AuthHelper.isLoggedIn() && !AuthHelper.isGuestLoggedIn()) {
       await Get.find<FavouriteController>().getFavouriteList();
       updateZone();
     }
-    if(route == 'splash' && Get.isDialogOpen!) {
+    if (route == 'splash' && Get.isDialogOpen!) {
       Get.back();
     }
     HomeScreen.loadData(true);
@@ -202,22 +300,46 @@ class LocationController extends GetxController implements GetxService {
     locationServiceInterface.handleRoute(fromSignUp, route, canRoute);
   }
 
-  Future<Position> setLocation(String placeID, String? address, GoogleMapController? mapController) async {
+  Future<Position> setLocation(
+      String address, GoogleMapController? mapController) async {
     _loading = true;
     update();
 
-    LatLng latLng = await locationServiceInterface.getLatLng(placeID);
+    // 🔍 الحصول على lat/lng من العنوان النصي
+    List<Location> locations = await locationFromAddress(address);
+    Location loc = locations.first;
+    LatLng latLng = LatLng(loc.latitude, loc.longitude);
 
+    // تحويل latLng إلى Position
     _pickPosition = Position(
-      latitude: latLng.latitude, longitude: latLng.longitude,
-      timestamp: DateTime.now(), accuracy: 1, altitude: 1, heading: 1, speed: 1, speedAccuracy: 1, altitudeAccuracy: 1, headingAccuracy: 1,
+      latitude: latLng.latitude,
+      longitude: latLng.longitude,
+      timestamp: DateTime.now(),
+      accuracy: 1,
+      altitude: 1,
+      heading: 1,
+      speed: 1,
+      speedAccuracy: 1,
+      altitudeAccuracy: 1,
+      headingAccuracy: 1,
     );
-    _pickAddress = address;
+
+    // ✅ استخدام geocoding للحصول على العنوان البشري
+    List<Placemark> placemarks =
+        await placemarkFromCoordinates(latLng.latitude, latLng.longitude);
+    Placemark placemark = placemarks.first;
+
+    _pickAddress =
+        "${placemark.name}, ${placemark.street}, ${placemark.locality}, ${placemark.country}";
     _changeAddress = false;
 
-    if(mapController != null) {
-      mapController.animateCamera(CameraUpdate.newCameraPosition(CameraPosition(target: latLng, zoom: 16)));
+    // تحريك الكاميرا على الموقع الجديد
+    if (mapController != null) {
+      mapController.animateCamera(CameraUpdate.newCameraPosition(
+        CameraPosition(target: latLng, zoom: 16),
+      ));
     }
+
     _loading = false;
     update();
     return _pickPosition;
@@ -236,10 +358,19 @@ class LocationController extends GetxController implements GetxService {
     update();
   }
 
-  void updateAddress(AddressModel address){
+  void updateAddress(AddressModel address) {
     _position = Position(
-      latitude: double.parse(address.latitude!), longitude: double.parse(address.longitude!), timestamp: DateTime.now(),
-      altitude: 1, heading: 1, speed: 1, speedAccuracy: 1, floor: 1, accuracy: 1, altitudeAccuracy: 1, headingAccuracy: 1,
+      latitude: double.parse(address.latitude!),
+      longitude: double.parse(address.longitude!),
+      timestamp: DateTime.now(),
+      altitude: 1,
+      heading: 1,
+      speed: 1,
+      speedAccuracy: 1,
+      floor: 1,
+      accuracy: 1,
+      altitudeAccuracy: 1,
+      headingAccuracy: 1,
     );
     _address = address.address;
     _addressTypeIndex = _addressTypeList.indexOf(address.addressType);
@@ -255,14 +386,61 @@ class LocationController extends GetxController implements GetxService {
   }
 
   Future<String> getAddressFromGeocode(LatLng latLng) async {
-    return await locationServiceInterface.getAddressFromGeocode(latLng);
+    List<Placemark> placemarks =
+        await placemarkFromCoordinates(latLng.latitude, latLng.longitude);
+    Placemark place = placemarks.first;
+    return '${place.street}, ${place.locality}, ${place.administrativeArea}, ${place.country}';
   }
 
   Future<List<PredictionModel>> searchLocation(String text) async {
-    _predictionList = [];
-    if(text.isNotEmpty) {
-      _predictionList = await locationServiceInterface.searchLocation(text);
+    List<PredictionModel> _predictionList = [];
+
+    if (text.isNotEmpty) {
+      try {
+        // نحصل على الإحداثيات من النص
+        List<Location> locations = await locationFromAddress(text);
+
+        for (var location in locations) {
+          // نحول الإحداثيات إلى اسم مكان
+          List<Placemark> placemarks = await placemarkFromCoordinates(
+            location.latitude,
+            location.longitude,
+          );
+
+          // نأخذ أول نتيجة ونعرض اسم المكان
+          if (placemarks.isNotEmpty) {
+            Placemark place = placemarks[0];
+            String fullAddress =
+                '${place.name}, ${place.street}, ${place.locality}, ${place.administrativeArea}, ${place.country}';
+
+            _predictionList.add(
+              PredictionModel(
+                description: fullAddress,
+                id: '', // حسب الحاجة
+                distanceMeters: 0,
+                placeId: '',
+                reference: '',
+              ),
+            );
+          }
+          _position = Position(
+            latitude: location.latitude,
+            longitude: location.longitude,
+            timestamp: DateTime.now(),
+            accuracy: 1,
+            altitude: 1,
+            heading: 1,
+            speed: 1,
+            speedAccuracy: 1,
+            altitudeAccuracy: 1,
+            headingAccuracy: 1,
+          );
+        }
+      } catch (e) {
+        print('خطأ في البحث: $e');
+      }
     }
+
     return _predictionList;
   }
 
@@ -277,5 +455,4 @@ class LocationController extends GetxController implements GetxService {
   Future<void> updateZone() async {
     await locationServiceInterface.updateZone();
   }
-
 }
